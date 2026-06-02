@@ -1,0 +1,982 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rodillones · FIFA World Cup 2026</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<style>body{margin:0;background:#000d2e}</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+// ─── BACKEND ─────────────────────────────────────────────────────────────────
+// URL de tu Google Apps Script Web App (ya desplegada)
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzn9Jn5KfbubuwUUhFdnZEPONjMGW2PPr8xwVxH7pXnLanjxIOc7D7LKWIQA_RqOtwDKA/exec";
+
+// ─── PALETTE ─────────────────────────────────────────────────────────────────
+const C = {
+  navy:"#003087", navyDark:"#001a4d", navyDeep:"#000d2e",
+  gold:"#F5C400", goldLight:"#FFD700", goldDim:"#c9a000",
+  white:"#FFFFFF", gray:"#8899bb", grayLight:"#c8d4ee",
+  red:"#e03030", green:"#22c55e",
+};
+
+// ─── FLAGS ───────────────────────────────────────────────────────────────────
+const FLAGS = {
+  "Mexico":"🇲🇽","South Korea":"🇰🇷","South Africa":"🇿🇦","Czech Republic":"🇨🇿",
+  "Canada":"🇨🇦","Switzerland":"🇨🇭","Qatar":"🇶🇦","Bosnia and Herzegovina":"🇧🇦",
+  "Brazil":"🇧🇷","Morocco":"🇲🇦","Scotland":"🏴󠁧󠁢󠁳󠁣󠁴󠁿","Haiti":"🇭🇹",
+  "United States":"🇺🇸","Australia":"🇦🇺","Paraguay":"🇵🇾","Türkiye":"🇹🇷",
+  "Germany":"🇩🇪","Curacao":"🇨🇼","Cote d'Ivoire":"🇨🇮","Ecuador":"🇪🇨",
+  "Netherlands":"🇳🇱","Japan":"🇯🇵","Tunisia":"🇹🇳","Sweden":"🇸🇪",
+  "Belgium":"🇧🇪","Iran":"🇮🇷","Egypt":"🇪🇬","New Zealand":"🇳🇿",
+  "Spain":"🇪🇸","Uruguay":"🇺🇾","Saudi Arabia":"🇸🇦","Cape Verde":"🇨🇻",
+  "France":"🇫🇷","Senegal":"🇸🇳","Norway":"🇳🇴","Iraq":"🇮🇶",
+  "Argentina":"🇦🇷","Austria":"🇦🇹","Algeria":"🇩🇿","Jordan":"🇯🇴",
+  "Portugal":"🇵🇹","Colombia":"🇨🇴","Uzbekistan":"🇺🇿","DR Congo":"🇨🇩",
+  "England":"🏴󠁧󠁢󠁥󠁮󠁧󠁿","Croatia":"🇭🇷","Panama":"🇵🇦","Ghana":"🇬🇭",
+  "TBD":"⚽",
+};
+const flag = t => FLAGS[t] || "⚽";
+
+// ─── GROUPS ──────────────────────────────────────────────────────────────────
+const GROUPS_DATA = {
+  A:["Mexico","South Korea","South Africa","Czech Republic"],
+  B:["Canada","Switzerland","Qatar","Bosnia and Herzegovina"],
+  C:["Brazil","Morocco","Scotland","Haiti"],
+  D:["United States","Australia","Paraguay","Türkiye"],
+  E:["Germany","Curacao","Cote d'Ivoire","Ecuador"],
+  F:["Netherlands","Japan","Tunisia","Sweden"],
+  G:["Belgium","Iran","Egypt","New Zealand"],
+  H:["Spain","Uruguay","Saudi Arabia","Cape Verde"],
+  I:["France","Senegal","Norway","Iraq"],
+  J:["Argentina","Austria","Algeria","Jordan"],
+  K:["Portugal","Colombia","Uzbekistan","DR Congo"],
+  L:["England","Croatia","Panama","Ghana"],
+};
+
+function generateGroupMatches(teams) {
+  const m=[];
+  for(let i=0;i<teams.length;i++)
+    for(let j=i+1;j<teams.length;j++)
+      m.push({home:teams[i],away:teams[j],homeScore:"",awayScore:""});
+  return m;
+}
+const INIT_GROUPS = Object.fromEntries(
+  Object.entries(GROUPS_DATA).map(([g,teams])=>[g,generateGroupMatches(teams)])
+);
+
+function calcStandings(teams, matches) {
+  const s = Object.fromEntries(teams.map(t=>[t,{pts:0,gd:0,gf:0,ga:0,p:0,w:0,d:0,l:0}]));
+  for(const m of matches){
+    const hs=parseInt(m.homeScore), as=parseInt(m.awayScore);
+    if(isNaN(hs)||isNaN(as)) continue;
+    s[m.home].p++; s[m.away].p++;
+    s[m.home].gf+=hs; s[m.home].ga+=as; s[m.home].gd+=hs-as;
+    s[m.away].gf+=as; s[m.away].ga+=hs; s[m.away].gd+=as-hs;
+    if(hs>as){s[m.home].pts+=3;s[m.home].w++;s[m.away].l++;}
+    else if(hs<as){s[m.away].pts+=3;s[m.away].w++;s[m.home].l++;}
+    else{s[m.home].pts++;s[m.away].pts++;s[m.home].d++;s[m.away].d++;}
+  }
+  return teams.slice().sort((a,b)=>
+    s[b].pts-s[a].pts||s[b].gd-s[a].gd||s[b].gf-s[a].gf
+  ).map(t=>({team:t,...s[t]}));
+}
+
+// ─── R32 MATRIX ──────────────────────────────────────────────────────────────
+const R32_FIXED = [
+  { m:1,  homeSlot:"E1",  awaySlot:"3rd_E1",  side:"left"  },
+  { m:2,  homeSlot:"A1",  awaySlot:"3rd_A1",  side:"left"  },
+  { m:3,  homeSlot:"B1",  awaySlot:"3rd_B1",  side:"left"  },
+  { m:4,  homeSlot:"A2",  awaySlot:"B2",       side:"left"  },
+  { m:5,  homeSlot:"C1",  awaySlot:"3rd_C1",  side:"left"  },
+  { m:6,  homeSlot:"E2",  awaySlot:"I2",       side:"left"  },
+  { m:7,  homeSlot:"L1",  awaySlot:"3rd_L1",  side:"left"  },
+  { m:8,  homeSlot:"I1",  awaySlot:"3rd_I1",  side:"left"  },
+  { m:9,  homeSlot:"J1",  awaySlot:"H2",       side:"right" },
+  { m:10, homeSlot:"D1",  awaySlot:"K2",       side:"right" },
+  { m:11, homeSlot:"G1",  awaySlot:"3rd_G1",  side:"right" },
+  { m:12, homeSlot:"C2",  awaySlot:"F2",       side:"right" },
+  { m:13, homeSlot:"F1",  awaySlot:"G2",       side:"right" },
+  { m:14, homeSlot:"K1",  awaySlot:"3rd_K1",  side:"right" },
+  { m:15, homeSlot:"H1",  awaySlot:"J2",       side:"right" },
+  { m:16, homeSlot:"D2",  awaySlot:"L2",       side:"right" },
+];
+
+function assignThirds(allThirdsRanked, groupStandings) {
+  const ALL_SLOTS = [
+    { leader:"E", eligible:["A","B","C","D","F"] },
+    { leader:"A", eligible:["C","E","F","H","I"] },
+    { leader:"B", eligible:["E","F","G","I","J"] },
+    { leader:"C", eligible:["A","B","D","F"]     },
+    { leader:"L", eligible:["E","H","I","J","K"] },
+    { leader:"I", eligible:["C","D","F","G","H"] },
+    { leader:"G", eligible:["A","E","H","I","J"] },
+    { leader:"K", eligible:["D","E","I","J","L"] },
+  ];
+  function tryAssign(thirdsPool) {
+    const groups = thirdsPool.map(t => t.group);
+    const slots = ALL_SLOTS
+      .filter(s => s.eligible.some(g => groups.includes(g)))
+      .sort((a, b) =>
+        a.eligible.filter(g => groups.includes(g)).length -
+        b.eligible.filter(g => groups.includes(g)).length
+      );
+    function bt(idx, avail, result) {
+      if (avail.length === 0) return result;
+      if (idx >= slots.length) return null;
+      const slot = slots[idx];
+      for (const cand of slot.eligible.filter(g => avail.includes(g))) {
+        const res = bt(idx + 1, avail.filter(g => g !== cand), { ...result, [slot.leader]: cand });
+        if (res) return res;
+      }
+      return null;
+    }
+    return bt(0, [...groups], {});
+  }
+  const pos = {};
+  for (const [g, rows] of Object.entries(groupStandings)) pos[g] = rows[2]?.team || "TBD";
+  for (let poolSize = 8; poolSize <= Math.min(12, allThirdsRanked.length); poolSize++) {
+    const result = tryAssign(allThirdsRanked.slice(0, poolSize));
+    if (result && Object.values(result).length === 8) {
+      const teamMap = {};
+      for (const [lg, tg] of Object.entries(result)) teamMap[lg] = pos[tg] || "TBD";
+      return teamMap;
+    }
+  }
+  return {};
+}
+
+function buildR32Matches(groupStandings) {
+  const pos = {};
+  for (const [g, rows] of Object.entries(groupStandings)) {
+    pos[`${g}1`] = rows[0]?.team || "TBD";
+    pos[`${g}2`] = rows[1]?.team || "TBD";
+    pos[`${g}3`] = rows[2]?.team || "TBD";
+  }
+  const allThirds = Object.entries(groupStandings).map(([g, rows]) => ({
+    group: g, team: rows[2]?.team || "TBD",
+    pts: rows[2]?.pts || 0, gd: rows[2]?.gd || 0, gf: rows[2]?.gf || 0,
+  })).sort((a,b) => b.pts-a.pts || b.gd-a.gd || b.gf-a.gf);
+  const thirdTeam = assignThirds(allThirds, groupStandings);
+  return R32_FIXED.map(f => {
+    const resolve = slot => {
+      if (slot.startsWith("3rd_")) {
+        const leaderG = slot.slice(4, slot.length - 1);
+        return thirdTeam[leaderG] || "TBD";
+      }
+      return pos[slot] || "TBD";
+    };
+    return { m: f.m, home: resolve(f.homeSlot), away: resolve(f.awaySlot),
+      winner: null, side: f.side, homeLabel: f.homeSlot, awayLabel: f.awaySlot };
+  });
+}
+
+// ─── CSS ─────────────────────────────────────────────────────────────────────
+const STYLES = `
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:wght@400;600;700&family=Barlow:wght@400;500&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:#000d2e;color:#fff;font-family:'Barlow',sans-serif;min-height:100vh}
+.app{min-height:100vh;background:linear-gradient(160deg,#000d2e 0%,#001a4d 40%,#002070 100%)}
+.hdr{background:linear-gradient(90deg,#000d2e,#001a4d,#000d2e);border-bottom:3px solid #F5C400;padding:0 20px;position:relative;overflow:hidden}
+.hdr::before{content:'';position:absolute;inset:0;background:repeating-linear-gradient(90deg,transparent,transparent 40px,rgba(245,196,0,.03) 40px,rgba(245,196,0,.03) 41px)}
+.hdr-inner{max-width:1400px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;padding:14px 0;position:relative}
+.badge{width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#003087 50%,#F5C400 50%);border:3px solid #F5C400;display:flex;align-items:center;justify-content:center;font-size:24px;box-shadow:0 0 20px rgba(245,196,0,.4);flex-shrink:0}
+.hdr-title{font-family:'Bebas Neue',cursive;font-size:2rem;color:#F5C400;letter-spacing:3px;line-height:1}
+.hdr-sub{font-family:'Barlow Condensed',sans-serif;font-size:.8rem;color:#8899bb;letter-spacing:2px;text-transform:uppercase}
+.admin-btn{background:transparent;border:1px solid rgba(245,196,0,.3);color:#8899bb;padding:6px 14px;border-radius:6px;font-size:.75rem;cursor:pointer;font-family:'Barlow Condensed',sans-serif;letter-spacing:1px;transition:all .2s}
+.admin-btn:hover{border-color:#F5C400;color:#F5C400}
+.tabs-bar{max-width:1400px;margin:0 auto;padding:16px 20px 0;display:flex;gap:3px;flex-wrap:wrap}
+.tab{font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:.82rem;letter-spacing:1.5px;text-transform:uppercase;padding:9px 16px;border:1px solid rgba(245,196,0,.1);border-bottom:none;border-radius:8px 8px 0 0;cursor:pointer;transition:all .2s;background:rgba(0,30,90,.5);color:#8899bb}
+.tab.active{background:rgba(245,196,0,.15);color:#F5C400;border-color:rgba(245,196,0,.4)}
+.tab:hover:not(.active){background:rgba(0,40,120,.6);color:#c8d4ee}
+.tab.locked{opacity:.4;cursor:not-allowed}
+.content{max-width:1400px;margin:0 auto;padding:20px}
+.prog-wrap{background:rgba(0,20,70,.5);border-radius:20px;height:5px;margin-bottom:16px;overflow:hidden}
+.prog-bar{height:100%;background:linear-gradient(90deg,#F5C400,#FFD700);border-radius:20px;transition:width .5s ease}
+.s-title{font-family:'Bebas Neue',cursive;font-size:1.7rem;color:#F5C400;letter-spacing:3px;margin-bottom:16px}
+.info-box{background:rgba(245,196,0,.07);border:1px solid rgba(245,196,0,.2);border-radius:8px;padding:10px 16px;font-size:.8rem;color:#8899bb;margin-bottom:16px;line-height:1.5}
+.groups-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px}
+.g-card{background:rgba(0,20,70,.7);border:1px solid rgba(245,196,0,.2);border-radius:12px;overflow:hidden}
+.g-hdr{background:linear-gradient(90deg,rgba(245,196,0,.2),rgba(245,196,0,.05));padding:8px 14px;border-bottom:1px solid rgba(245,196,0,.2)}
+.g-letter{font-family:'Bebas Neue',cursive;font-size:1.6rem;color:#F5C400;line-height:1}
+.standings{width:100%;border-collapse:collapse;margin-bottom:10px}
+.standings th{font-family:'Barlow Condensed',sans-serif;font-size:.68rem;color:#8899bb;letter-spacing:1px;text-transform:uppercase;padding:5px 6px;text-align:center;border-bottom:1px solid rgba(245,196,0,.1)}
+.standings th:first-child{text-align:left}
+.standings td{padding:4px 6px;font-size:.78rem;text-align:center;border-bottom:1px solid rgba(255,255,255,.04)}
+.standings td:first-child{text-align:left}
+.standings tr:nth-child(1) td,.standings tr:nth-child(2) td{background:rgba(245,196,0,.05)}
+.standings tr:nth-child(1) td:first-child,.standings tr:nth-child(2) td:first-child{border-left:3px solid #F5C400}
+.t-cell{display:flex;align-items:center;gap:5px;font-weight:500;white-space:nowrap}
+.pts-b{background:#F5C400;color:#000d2e;font-weight:700;border-radius:4px;padding:1px 5px;font-size:.72rem}
+.match-row{display:flex;align-items:center;gap:6px;padding:5px 14px;border-top:1px solid rgba(255,255,255,.04)}
+.m-team{flex:1;display:flex;align-items:center;gap:4px;font-size:.75rem;font-weight:500}
+.m-team.away{justify-content:flex-end;flex-direction:row-reverse}
+.score-inp{width:34px;height:26px;background:rgba(0,40,120,.6);border:1px solid rgba(245,196,0,.3);border-radius:6px;color:#F5C400;text-align:center;font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:.88rem;outline:none}
+.score-inp:focus{border-color:#F5C400;box-shadow:0 0 8px rgba(245,196,0,.3)}
+.score-sep{color:#8899bb;font-size:.78rem;font-weight:700}
+.matches-lbl{font-family:'Barlow Condensed',sans-serif;font-size:.7rem;color:#8899bb;letter-spacing:1px;text-transform:uppercase;padding:0 14px 4px}
+.adv-btn{display:block;width:fit-content;margin:20px auto 0;background:linear-gradient(135deg,#003087,rgba(0,48,135,.8));border:1px solid #F5C400;color:#F5C400;font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:.85rem;letter-spacing:1.5px;text-transform:uppercase;padding:10px 28px;border-radius:8px;cursor:pointer;transition:all .2s}
+.adv-btn:hover{background:rgba(245,196,0,.15)}
+.adv-btn:disabled{opacity:.35;cursor:not-allowed}
+.bracket-page{overflow-x:auto;padding-bottom:24px}
+.bracket-side-label{font-family:'Bebas Neue',cursive;font-size:1rem;color:#F5C400;letter-spacing:3px;text-align:center;padding:8px;background:rgba(245,196,0,.08);border-radius:8px;margin-bottom:12px;border:1px solid rgba(245,196,0,.15)}
+.bm{background:rgba(0,20,70,.85);border:1px solid rgba(245,196,0,.2);border-radius:10px;width:190px;overflow:hidden;transition:border-color .2s;flex-shrink:0}
+.bm:hover{border-color:rgba(245,196,0,.5)}
+.bm.gold-final{border:2px solid #F5C400;box-shadow:0 0 20px rgba(245,196,0,.3)}
+.bm-num{font-family:'Barlow Condensed',sans-serif;font-size:.65rem;color:#8899bb;letter-spacing:1px;padding:4px 8px 2px;border-bottom:1px solid rgba(245,196,0,.1);text-align:center}
+.bm-team{display:flex;align-items:center;gap:6px;padding:7px 9px;cursor:pointer;transition:background .15s;font-size:.78rem;font-weight:500}
+.bm-team:first-of-type{border-bottom:1px solid rgba(255,255,255,.06)}
+.bm-team:hover{background:rgba(245,196,0,.1)}
+.bm-team.winner{background:rgba(245,196,0,.18);color:#F5C400;font-weight:700}
+.bm-team.loser{opacity:.38}
+.bm-team.tbd{color:#8899bb;font-style:italic;cursor:default}
+.bm-flag{font-size:.95rem;flex-shrink:0}
+.bm-name{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bm-tick{color:#F5C400;font-size:.65rem;margin-left:2px}
+.thirds-wrap{margin-top:20px}
+.thirds-title{font-family:'Barlow Condensed',sans-serif;font-size:.85rem;color:#8899bb;letter-spacing:2px;text-transform:uppercase;margin-bottom:10px}
+.thirds-table{width:100%;border-collapse:collapse;background:rgba(0,20,70,.5);border-radius:10px;overflow:hidden;border:1px solid rgba(245,196,0,.15)}
+.thirds-table th{font-family:'Barlow Condensed',sans-serif;font-size:.7rem;color:#8899bb;letter-spacing:1px;text-transform:uppercase;padding:7px 10px;text-align:center;border-bottom:1px solid rgba(245,196,0,.15)}
+.thirds-table th:first-child{text-align:left}
+.thirds-table td{padding:6px 10px;font-size:.8rem;text-align:center;border-bottom:1px solid rgba(255,255,255,.04)}
+.thirds-table td:first-child{text-align:left}
+.thirds-table tr.qualify td{background:rgba(34,197,94,.07)}
+.thirds-table tr.qualify td:first-child{border-left:3px solid #22c55e}
+.thirds-table tr.elim td{opacity:.45}
+.champ-banner{text-align:center;padding:36px 20px;background:linear-gradient(135deg,rgba(245,196,0,.1),rgba(0,30,90,.5));border:2px solid #F5C400;border-radius:16px;margin-bottom:24px}
+.champ-trophy{font-size:3.5rem;display:block;margin-bottom:10px;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.1)}}
+.champ-lbl{font-family:'Barlow Condensed',sans-serif;font-size:.9rem;color:#8899bb;letter-spacing:3px;text-transform:uppercase;margin-bottom:6px}
+.champ-name{font-family:'Bebas Neue',cursive;font-size:3rem;color:#F5C400;letter-spacing:4px;line-height:1}
+.champ-flag{font-size:2.5rem;display:block;margin-top:6px}
+/* SAVE */
+.save-sec{background:rgba(0,20,70,.7);border:1px solid rgba(245,196,0,.3);border-radius:12px;padding:22px;margin-top:24px}
+.save-title{font-family:'Bebas Neue',cursive;font-size:1.4rem;color:#F5C400;letter-spacing:2px;margin-bottom:14px}
+.save-form{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+.f-grp{display:flex;flex-direction:column;gap:5px}
+.f-lbl{font-family:'Barlow Condensed',sans-serif;font-size:.72rem;color:#8899bb;letter-spacing:1px;text-transform:uppercase}
+.f-inp{background:rgba(0,40,120,.5);border:1px solid rgba(245,196,0,.3);border-radius:8px;color:#fff;padding:9px 13px;font-family:'Barlow',sans-serif;font-size:.88rem;outline:none;min-width:170px}
+.f-inp:focus{border-color:#F5C400;box-shadow:0 0 10px rgba(245,196,0,.2)}
+.save-btn{background:linear-gradient(135deg,#F5C400,#c9a000);color:#000d2e;font-family:'Bebas Neue',cursive;font-size:1.05rem;letter-spacing:2px;border:none;border-radius:8px;padding:10px 26px;cursor:pointer;transition:all .2s;box-shadow:0 4px 14px rgba(245,196,0,.3)}
+.save-btn:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(245,196,0,.5)}
+.save-btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.save-ok{font-family:'Barlow Condensed',sans-serif;font-size:.88rem;padding:8px 0;margin-top:8px}
+.save-ok.ok{color:#22c55e}
+.save-ok.err{color:#e03030}
+.save-ok.loading{color:#8899bb}
+/* ADMIN */
+.admin-panel{background:rgba(0,10,40,.95);border:2px solid #F5C400;border-radius:16px;padding:26px}
+.admin-title{font-family:'Bebas Neue',cursive;font-size:1.9rem;color:#F5C400;letter-spacing:3px;margin-bottom:4px}
+.admin-sub{color:#8899bb;font-size:.82rem;margin-bottom:22px}
+.admin-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.admin-card{background:rgba(0,20,70,.7);border:1px solid rgba(245,196,0,.2);border-radius:10px;padding:14px}
+.admin-champ{display:flex;align-items:center;gap:8px;background:rgba(245,196,0,.1);border-radius:8px;padding:8px 12px;margin-top:8px}
+.admin-del{background:rgba(224,48,48,.15);border:1px solid rgba(224,48,48,.3);color:#e03030;border-radius:6px;padding:4px 10px;font-size:.7rem;cursor:pointer;font-family:'Barlow Condensed',sans-serif;letter-spacing:1px}
+.admin-del:hover{background:rgba(224,48,48,.3)}
+.admin-empty{text-align:center;padding:40px;color:#8899bb;font-family:'Barlow Condensed',sans-serif;font-size:1rem;letter-spacing:1px}
+/* LOGIN */
+.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(160deg,#000d2e,#001a4d)}
+.login-box{background:rgba(0,20,70,.9);border:2px solid #F5C400;border-radius:16px;padding:36px;width:320px;text-align:center}
+.login-icon{font-size:2.8rem;margin-bottom:10px}
+.login-title{font-family:'Bebas Neue',cursive;font-size:1.9rem;color:#F5C400;letter-spacing:3px;margin-bottom:4px}
+.login-sub{color:#8899bb;font-size:.78rem;margin-bottom:22px}
+.login-inp{width:100%;background:rgba(0,40,120,.5);border:1px solid rgba(245,196,0,.3);border-radius:8px;color:#fff;padding:11px 14px;font-size:.95rem;outline:none;margin-bottom:14px;text-align:center;letter-spacing:2px}
+.login-inp:focus{border-color:#F5C400}
+.login-btn{width:100%;background:linear-gradient(135deg,#F5C400,#c9a000);color:#000d2e;font-family:'Bebas Neue',cursive;font-size:1.15rem;letter-spacing:2px;border:none;border-radius:8px;padding:12px;cursor:pointer}
+.login-err{color:#e03030;font-size:.78rem;margin-top:8px}
+@media(max-width:700px){
+  .hdr-title{font-size:1.5rem}
+  .groups-grid{grid-template-columns:1fr}
+  .bm{width:155px}
+}
+`;
+
+// ─── GOOGLE SHEETS API ────────────────────────────────────────────────────────
+
+// Escribe datos en Google Sheets via POST con body JSON (text/plain es simple → no preflight)
+// El Apps Script lee e.postData.contents y hace JSON.parse()
+const sheetsWrite = async (params) => {
+  try {
+    await fetch(SCRIPT_URL, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify(params),
+    });
+  } catch (_) {}
+};
+
+// Lee todas las simulaciones desde Google Sheets via GET
+const sheetsRead = async () => {
+  try {
+    const res  = await fetch(SCRIPT_URL + "?action=getAll", { mode: "cors" });
+    const data = await res.json();
+    return data.simulations || [];
+  } catch (_) { return null; }
+};
+
+// ─── BRACKET MATCH CARD ──────────────────────────────────────────────────────
+function BMatch({ match, onSelect, num, gold }) {
+  if (!match) return null;
+  const { home, away, winner } = match;
+  const tbd = home === "TBD" || away === "TBD";
+  const hw = winner === home, aw = winner === away;
+  return (
+    <div className={`bm${gold?" gold-final":""}`}>
+      <div className="bm-num">Partido {num}</div>
+      <div className={`bm-team${tbd?" tbd":hw?" winner":winner?" loser":""}`}
+        onClick={() => !tbd && home !== "TBD" && onSelect && onSelect(home)}>
+        <span className="bm-flag">{flag(home)}</span>
+        <span className="bm-name">{home}</span>
+        {hw && <span className="bm-tick">✓</span>}
+      </div>
+      <div className={`bm-team${tbd?" tbd":aw?" winner":winner?" loser":""}`}
+        onClick={() => !tbd && away !== "TBD" && onSelect && onSelect(away)}>
+        <span className="bm-flag">{flag(away)}</span>
+        <span className="bm-name">{away}</span>
+        {aw && <span className="bm-tick">✓</span>}
+      </div>
+    </div>
+  );
+}
+
+// ─── BRACKET VIEW ─────────────────────────────────────────────────────────────
+function BracketView({ r32, r16, qf, sf, final, onR32, onR16, onQF, onSF, onFinal, champion, thirdPlace }) {
+  const r32L = r32 ? r32.filter(m => m.side === "left") : [];
+  const r32R = r32 ? r32.filter(m => m.side === "right") : [];
+  const colStyle = { display:"flex", flexDirection:"column", gap:8, flexShrink:0 };
+  const matchH = 78, gap8 = 8;
+  const qfL = qf ? qf.filter(m => m.side === "left")  : [];
+  const sfL = sf ? sf[0] : null;
+  const sfR = sf ? sf[1] : null;
+  const qfR = qf ? qf.filter(m => m.side === "right") : [];
+  const r16L = r16 ? r16.filter(m => m.side === "left")  : [];
+  const r16R = r16 ? r16.filter(m => m.side === "right") : [];
+  const GapBox = ({ h }) => <div style={{ height: h || 8 }} />;
+  const colHdr = txt => (
+    <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:".68rem",color:"#8899bb",
+      letterSpacing:"2px",textTransform:"uppercase",textAlign:"center",
+      padding:"5px 4px",borderBottom:"1px solid rgba(245,196,0,.15)",marginBottom:4}}>{txt}</div>
+  );
+  const ArrowCol = () => (
+    <div style={{width:18,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0,alignSelf:"stretch"}}>
+      <div style={{width:12,height:"100%",borderRight:"2px solid rgba(245,196,0,.2)"}}/>
+    </div>
+  );
+  return (
+    <div className="bracket-page">
+      {champion && (
+        <div className="champ-banner">
+          <span className="champ-trophy">🏆</span>
+          <div className="champ-lbl">Campeón del Mundo 2026</div>
+          <div className="champ-name">{champion}</div>
+          <span className="champ-flag">{flag(champion)}</span>
+          {thirdPlace && <div style={{color:"#8899bb",fontFamily:"'Barlow Condensed',sans-serif",marginTop:10,fontSize:".85rem",letterSpacing:"1px"}}>🥉 Tercer lugar: {flag(thirdPlace)} {thirdPlace}</div>}
+        </div>
+      )}
+      <div style={{overflowX:"auto",paddingBottom:20}}>
+        <div style={{display:"flex",gap:6,minWidth:1200,alignItems:"flex-start",padding:"4px 0"}}>
+          {/* LEFT */}
+          <div style={{display:"flex",flexDirection:"column",flex:1}}>
+            <div className="bracket-side-label">◀ LADO IZQUIERDO</div>
+            <div style={{display:"flex",gap:4,alignItems:"flex-start"}}>
+              {r32 && (
+                <div style={colStyle}>
+                  {colHdr("16avos")}
+                  {r32L.map((m,i) => (<div key={i}><BMatch match={m} num={m.m} onSelect={t=>onR32&&onR32(r32.indexOf(m),t)}/>{i<r32L.length-1&&<GapBox h={8}/>}</div>))}
+                </div>
+              )}
+              {r16 && <ArrowCol/>}
+              {r16 && (
+                <div style={{...colStyle,marginTop:(matchH+gap8)/2}}>
+                  {colHdr("8avos")}
+                  {r16L.map((m,i) => (<div key={i}><BMatch match={m} num={m.m} onSelect={t=>onR16&&onR16(r16.indexOf(m),t)}/>{i<r16L.length-1&&<GapBox h={matchH+gap8}/>}</div>))}
+                </div>
+              )}
+              {qf && <ArrowCol/>}
+              {qf && (
+                <div style={{...colStyle,marginTop:(matchH+gap8)*1.5}}>
+                  {colHdr("Cuartos")}
+                  {qfL.map((m,i) => (<div key={i}><BMatch match={m} num={m.m} onSelect={t=>onQF&&onQF(qf.indexOf(m),t)}/>{i<qfL.length-1&&<GapBox h={(matchH+gap8)*3}/>}</div>))}
+                </div>
+              )}
+              {sf && <ArrowCol/>}
+              {sf && (
+                <div style={{...colStyle,marginTop:(matchH+gap8)*3.5}}>
+                  {colHdr("Semifinal")}
+                  <BMatch match={sfL} num={sfL?.m||"SF1"} onSelect={t=>onSF&&onSF(0,t)}/>
+                </div>
+              )}
+            </div>
+          </div>
+          {/* CENTER */}
+          <div style={{display:"flex",flexDirection:"column",alignItems:"center",flexShrink:0,width:220,paddingTop:40}}>
+            <div style={{fontFamily:"'Bebas Neue',cursive",fontSize:"1rem",color:"#F5C400",letterSpacing:"3px",marginBottom:12,textAlign:"center"}}>🏆 FINAL</div>
+            {final && (<>
+              <BMatch match={final.main} num="F" onSelect={t=>onFinal&&onFinal("main",t)} gold/>
+              <div style={{height:16}}/>
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:".7rem",color:"#8899bb",letterSpacing:"2px",textTransform:"uppercase",marginBottom:8,textAlign:"center"}}>🥉 3er Puesto</div>
+              <BMatch match={final.third} num="3P" onSelect={t=>onFinal&&onFinal("third",t)}/>
+            </>)}
+            {!final && <div style={{color:"rgba(136,153,187,.4)",fontFamily:"'Bebas Neue',cursive",fontSize:"1.5rem",letterSpacing:"3px",textAlign:"center",marginTop:30}}>FINAL</div>}
+          </div>
+          {/* RIGHT */}
+          <div style={{display:"flex",flexDirection:"column",flex:1}}>
+            <div className="bracket-side-label">LADO DERECHO ▶</div>
+            <div style={{display:"flex",gap:4,alignItems:"flex-start",flexDirection:"row-reverse"}}>
+              {r32 && (
+                <div style={colStyle}>
+                  {colHdr("16avos")}
+                  {r32R.map((m,i) => (<div key={i}><BMatch match={m} num={m.m} onSelect={t=>onR32&&onR32(r32.indexOf(m),t)}/>{i<r32R.length-1&&<GapBox h={8}/>}</div>))}
+                </div>
+              )}
+              {r16 && <ArrowCol/>}
+              {r16 && (
+                <div style={{...colStyle,marginTop:(matchH+gap8)/2}}>
+                  {colHdr("8avos")}
+                  {r16R.map((m,i) => (<div key={i}><BMatch match={m} num={m.m} onSelect={t=>onR16&&onR16(r16.indexOf(m),t)}/>{i<r16R.length-1&&<GapBox h={matchH+gap8}/>}</div>))}
+                </div>
+              )}
+              {qf && <ArrowCol/>}
+              {qf && (
+                <div style={{...colStyle,marginTop:(matchH+gap8)*1.5}}>
+                  {colHdr("Cuartos")}
+                  {qfR.map((m,i) => (<div key={i}><BMatch match={m} num={m.m} onSelect={t=>onQF&&onQF(qf.indexOf(m),t)}/>{i<qfR.length-1&&<GapBox h={(matchH+gap8)*3}/>}</div>))}
+                </div>
+              )}
+              {sf && <ArrowCol/>}
+              {sf && (
+                <div style={{...colStyle,marginTop:(matchH+gap8)*3.5}}>
+                  {colHdr("Semifinal")}
+                  <BMatch match={sfR} num={sfR?.m||"SF2"} onSelect={t=>onSF&&onSF(1,t)}/>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── ADMIN CARD ───────────────────────────────────────────────────────────────
+function AdminCard({ s, onDelete }) {
+  const [open, setOpen] = useState(false);
+  // Los datos detallados pueden venir expandidos del snapshot o directamente del estado
+  const snap = (() => { try { return s.snapshot ? JSON.parse(s.snapshot) : {}; } catch { return {}; } })();
+  const r32Results  = s.r32Results  || snap.r32Results  || [];
+  const r16Results  = s.r16Results  || snap.r16Results  || [];
+  const qfResults   = s.qfResults   || snap.qfResults   || [];
+  const sfResults   = s.sfResults   || snap.sfResults   || [];
+  const finalResult = s.finalResult || snap.finalResult || null;
+  const groupScores = s.groupScores || snap.groupScores || null;
+  const phaseLabel  = { r32Results:"16avos", r16Results:"8avos", qfResults:"Cuartos", sfResults:"Semis" };
+  const hasDetail   = r32Results.length>0 || r16Results.length>0 || groupScores;
+  return (
+    <div className="admin-card">
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+        <div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:"1rem"}}>{s.name}</div>
+          <div style={{color:C.gold,fontSize:".82rem"}}>"{s.nick}"</div>
+        </div>
+        <div style={{textAlign:"right"}}>
+          <div style={{color:C.gray,fontSize:".7rem",marginBottom:4}}>{s.date}</div>
+          <button className="admin-del" onClick={()=>onDelete(s.id)}>Eliminar</button>
+        </div>
+      </div>
+      <div className="admin-champ">
+        <span style={{fontSize:"1.4rem"}}>{flag(s.champion)}</span>
+        <div>
+          <div style={{color:C.gray,fontSize:".68rem",letterSpacing:"1px",textTransform:"uppercase",fontFamily:"'Barlow Condensed',sans-serif"}}>🏆 Campeón</div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,fontSize:".92rem",color:C.gold}}>{s.champion}</div>
+        </div>
+      </div>
+      {s.thirdPlace && (
+        <div style={{padding:"5px 12px",fontSize:".75rem",color:C.gray}}>
+          🥉 3er lugar: {flag(s.thirdPlace)} {s.thirdPlace}
+        </div>
+      )}
+      {hasDetail && (
+        <button onClick={()=>setOpen(!open)} style={{
+          width:"100%",background:"rgba(245,196,0,.07)",border:"1px solid rgba(245,196,0,.15)",
+          borderRadius:6,color:C.gray,fontFamily:"'Barlow Condensed',sans-serif",
+          fontSize:".72rem",letterSpacing:"1px",padding:"5px",cursor:"pointer",marginTop:6,
+        }}>{open?"▲ Ocultar detalle":"▼ Ver simulación completa"}</button>
+      )}
+      {open && (
+        <div style={{marginTop:8,borderTop:"1px solid rgba(245,196,0,.15)",paddingTop:8}}>
+          {["r32Results","r16Results","qfResults","sfResults"].map(phase => {
+            const results = {r32Results,r16Results,qfResults,sfResults}[phase];
+            if (!results || results.length===0) return null;
+            return (
+              <div key={phase} style={{marginBottom:8}}>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:".7rem",color:C.gold,letterSpacing:"1.5px",textTransform:"uppercase",marginBottom:4}}>⚡ {phaseLabel[phase]}</div>
+                {results.map((m,i) => (
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:4,fontSize:".72rem",padding:"2px 4px",borderRadius:4,background:m.w?"rgba(245,196,0,.05)":"transparent"}}>
+                    <span style={{opacity:m.w===m.home?1:.45,flex:1,textAlign:"right",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{flag(m.home)} {m.home}</span>
+                    <span style={{color:C.gold,fontWeight:700,fontSize:".65rem",flexShrink:0}}>{m.w?(m.w===m.home?"✓  ":"  ✓"):"vs"}</span>
+                    <span style={{opacity:m.w===m.away?1:.45,flex:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{flag(m.away)} {m.away}</span>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+          {finalResult && (
+            <div style={{marginBottom:8}}>
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:".7rem",color:C.gold,letterSpacing:"1.5px",textTransform:"uppercase",marginBottom:4}}>🏆 Final</div>
+              {[{label:"Gran Final",data:finalResult.main},{label:"3er Puesto",data:finalResult.third}].map(({label,data})=>
+                data ? (
+                  <div key={label} style={{display:"flex",alignItems:"center",gap:4,fontSize:".72rem",padding:"2px 4px"}}>
+                    <span style={{fontSize:".65rem",color:C.gray,width:60,flexShrink:0}}>{label}:</span>
+                    <span style={{opacity:data.w===data.home?1:.45,flex:1,textAlign:"right",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{flag(data.home)} {data.home}</span>
+                    <span style={{color:C.gold,fontWeight:700,fontSize:".65rem",flexShrink:0}}>{data.w?(data.w===data.home?"✓  ":"  ✓"):"vs"}</span>
+                    <span style={{opacity:data.w===data.away?1:.45,flex:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{flag(data.away)} {data.away}</span>
+                  </div>
+                ) : null
+              )}
+            </div>
+          )}
+          {groupScores && (
+            <div>
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:".7rem",color:C.gold,letterSpacing:"1.5px",textTransform:"uppercase",marginBottom:4}}>⚽ Grupos</div>
+              {Object.entries(groupScores).map(([g,matches]) => (
+                <div key={g} style={{marginBottom:4}}>
+                  <span style={{fontFamily:"'Bebas Neue',cursive",color:C.gold,fontSize:".8rem",marginRight:4}}>Grupo {g}</span>
+                  {matches.map((m,i)=>(<span key={i} style={{fontSize:".68rem",color:C.gray,marginRight:6}}>{(m.home||"").split(" ")[0]} {m.hs}-{m.as} {(m.away||"").split(" ")[0]}</span>))}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
+function Rodillones() {
+  const [tab,          setTab]          = useState("groups");
+  const [groupMatches, setGroupMatches] = useState(INIT_GROUPS);
+  const [r32,          setR32]          = useState(null);
+  const [r16,          setR16]          = useState(null);
+  const [qf,           setQf]           = useState(null);
+  const [sf,           setSf]           = useState(null);
+  const [finalMatch,   setFinalMatch]   = useState(null);
+  const [champion,     setChampion]     = useState(null);
+  const [thirdPlace,   setThirdPlace]   = useState(null);
+  const [userName,     setUserName]     = useState("");
+  const [userNick,     setUserNick]     = useState("");
+  const [savedMsg,     setSavedMsg]     = useState("");
+  const [savedMsgType, setSavedMsgType] = useState("ok"); // "ok"|"err"|"loading"
+  const [simulations,  setSimulations]  = useState([]);
+  const [adminMode,    setAdminMode]    = useState(false);
+  const [showLogin,    setShowLogin]    = useState(false);
+  const [loginPwd,     setLoginPwd]     = useState("");
+  const [loginErr,     setLoginErr]     = useState("");
+  const [loadingData,  setLoadingData]  = useState(true);
+
+  // Cargar simulaciones desde Google Sheets al montar
+  useEffect(() => {
+    (async () => {
+      const sims = await sheetsRead();
+      if (sims) setSimulations(sims);
+      setLoadingData(false);
+    })();
+  }, []);
+
+  const groupStandings = Object.fromEntries(
+    Object.entries(GROUPS_DATA).map(([g,teams]) => [g, calcStandings(teams, groupMatches[g])])
+  );
+
+  const groupsDone = Object.values(groupMatches).every(ms =>
+    ms.every(m => m.homeScore !== "" && m.awayScore !== "" &&
+      !isNaN(parseInt(m.homeScore)) && !isNaN(parseInt(m.awayScore)))
+  );
+
+  const updateScore = (group, idx, side, val) => {
+    if (val !== "" && (isNaN(parseInt(val)) || parseInt(val) < 0)) return;
+    setGroupMatches(prev => {
+      const u = {...prev};
+      const arr = [...u[group]];
+      arr[idx] = {...arr[idx], [side==="home"?"homeScore":"awayScore"]: val===""?"":String(parseInt(val))};
+      u[group] = arr;
+      return u;
+    });
+  };
+
+  const allThirdsRanked = Object.entries(groupStandings).map(([g,rows]) => ({
+    group:g, team:rows[2]?.team||"TBD",
+    pts:rows[2]?.pts??0, gd:rows[2]?.gd??0, gf:rows[2]?.gf??0,
+  })).sort((a,b) => b.pts-a.pts||b.gd-a.gd||b.gf-a.gf);
+
+  const advanceToR32 = () => {
+    setR32(buildR32Matches(groupStandings));
+    setR16(null); setQf(null); setSf(null); setFinalMatch(null);
+    setChampion(null); setThirdPlace(null);
+    setTab("bracket");
+  };
+
+  const r32Done = r32?.every(m=>m.winner);
+  const r16Done = r16?.every(m=>m.winner);
+  const qfDone  = qf?.every(m=>m.winner);
+
+  const selectR32Winner = (idx,team) => setR32(prev=>{const a=[...prev];a[idx]={...a[idx],winner:team};return a;});
+
+  const advanceToR16 = () => {
+    if (!r32Done) return;
+    const leftW  = r32.filter(m=>m.side==="left").map(m=>m.winner);
+    const rightW = r32.filter(m=>m.side==="right").map(m=>m.winner);
+    const mk = (side,ws,base) => [[0,1],[2,3],[4,5],[6,7]].map(([a,b],i)=>({m:base+i,home:ws[a],away:ws[b],winner:null,side}));
+    setR16([...mk("left",leftW,17),...mk("right",rightW,21)]);
+    setQf(null); setSf(null); setFinalMatch(null); setChampion(null); setThirdPlace(null);
+  };
+
+  const selectR16Winner = (idx,team) => setR16(prev=>{const a=[...prev];a[idx]={...a[idx],winner:team};return a;});
+
+  const advanceToQF = () => {
+    if (!r16Done) return;
+    const leftW  = r16.filter(m=>m.side==="left").map(m=>m.winner);
+    const rightW = r16.filter(m=>m.side==="right").map(m=>m.winner);
+    setQf([
+      ...[[0,1],[2,3]].map(([a,b],i)=>({m:25+i,home:leftW[a],away:leftW[b],winner:null,side:"left"})),
+      ...[[0,1],[2,3]].map(([a,b],i)=>({m:27+i,home:rightW[a],away:rightW[b],winner:null,side:"right"})),
+    ]);
+    setSf(null); setFinalMatch(null); setChampion(null); setThirdPlace(null);
+  };
+
+  const selectQFWinner = (idx,team) => setQf(prev=>{const a=[...prev];a[idx]={...a[idx],winner:team};return a;});
+
+  const advanceToSF = () => {
+    if (!qfDone) return;
+    const leftW  = qf.filter(m=>m.side==="left").map(m=>m.winner);
+    const rightW = qf.filter(m=>m.side==="right").map(m=>m.winner);
+    setSf([
+      {m:29,home:leftW[0], away:leftW[1], winner:null},
+      {m:30,home:rightW[0],away:rightW[1],winner:null},
+    ]);
+    setFinalMatch(null); setChampion(null); setThirdPlace(null);
+  };
+
+  const selectSFWinner = (idx,team) => {
+    setSf(prev => {
+      const updated=[...prev]; updated[idx]={...updated[idx],winner:team};
+      if (updated.every(m=>m.winner)) {
+        const losers = updated.map(m=>m.home===m.winner?m.away:m.home);
+        setFinalMatch({
+          main:  {m:32,home:updated[0].winner,away:updated[1].winner,winner:null},
+          third: {m:31,home:losers[0],away:losers[1],winner:null},
+        });
+      }
+      return updated;
+    });
+  };
+
+  const selectFinalWinner = (which,team) => {
+    setFinalMatch(prev=>{
+      const upd={...prev,[which]:{...prev[which],winner:team}};
+      if(which==="main") setChampion(team);
+      if(which==="third") setThirdPlace(team);
+      return upd;
+    });
+  };
+
+  // ── GUARDAR en Google Sheets ───────────────────────────────────────────────
+  const handleSave = async () => {
+    if (!userName.trim() || !userNick.trim()) return;
+
+    const r32Results  = (r32||[]).map(m=>({m:m.m,home:m.home,away:m.away,w:m.winner}));
+    const r16Results  = (r16||[]).map(m=>({m:m.m,home:m.home,away:m.away,w:m.winner}));
+    const qfResults   = (qf ||[]).map(m=>({m:m.m,home:m.home,away:m.away,w:m.winner}));
+    const sfResults   = (sf ||[]).map(m=>({m:m.m,home:m.home,away:m.away,w:m.winner}));
+    const finalResult = finalMatch ? {
+      main:  {home:finalMatch.main?.home,  away:finalMatch.main?.away,  w:finalMatch.main?.winner},
+      third: {home:finalMatch.third?.home, away:finalMatch.third?.away, w:finalMatch.third?.winner},
+    } : null;
+    const groupScores = {};
+    Object.entries(groupMatches).forEach(([g,matches]) => {
+      groupScores[g] = matches.map(m=>({home:m.home,away:m.away,hs:m.homeScore,as:m.awayScore}));
+    });
+
+    const entry = {
+      id:         String(Date.now()),
+      name:       userName.trim(),
+      nick:       userNick.trim(),
+      champion:   champion   || "Sin definir",
+      thirdPlace: thirdPlace || "Sin definir",
+      date:       new Date().toLocaleString("es-CO",{dateStyle:"medium",timeStyle:"short"}),
+      r32Results, r16Results, qfResults, sfResults, finalResult, groupScores,
+    };
+
+    setSavedMsgType("loading");
+    setSavedMsg("⏳ Guardando en Google Sheets...");
+
+    // Enviar a Google Sheets via POST
+    await sheetsWrite({
+      action:     "save",
+      id:         entry.id,
+      name:       entry.name,
+      nick:       entry.nick,
+      champion:   entry.champion,
+      thirdPlace: entry.thirdPlace,
+      date:       entry.date,
+      snapshot:   JSON.stringify({r32Results, r16Results, qfResults, sfResults, finalResult, groupScores}),
+    });
+
+    // Actualizar estado local inmediatamente (optimista)
+    setSimulations(prev => [...prev, entry]);
+    setSavedMsgType("ok");
+    setSavedMsg("✅ ¡Simulación de " + entry.name + " guardada en Google Sheets!");
+    setUserName("");
+    setUserNick("");
+    setTimeout(() => setSavedMsg(""), 6000);
+  };
+
+  // ── ELIMINAR ───────────────────────────────────────────────────────────────
+  const handleDelete = async id => {
+    await sheetsWrite({ action: "delete", id: String(id) });
+    setSimulations(prev => prev.filter(s => String(s.id) !== String(id)));
+  };
+
+  // ── REFRESH admin ─────────────────────────────────────────────────────────
+  const handleRefresh = async () => {
+    setLoadingData(true);
+    const sims = await sheetsRead();
+    if (sims) setSimulations(sims);
+    setLoadingData(false);
+  };
+
+  const handleLogin = () => {
+    if (loginPwd === "Boca_Juniors_2026") {
+      setAdminMode(true); setShowLogin(false); setLoginPwd(""); setLoginErr(""); setTab("admin");
+    } else setLoginErr("Contraseña incorrecta");
+  };
+
+  const progress = (() => {
+    let p = 0;
+    if (groupsDone)              p += 15;
+    if (r32?.every(m=>m.winner)) p += 15;
+    if (r16?.every(m=>m.winner)) p += 15;
+    if (qf?.every(m=>m.winner))  p += 15;
+    if (sf?.every(m=>m.winner))  p += 20;
+    if (finalMatch?.main?.winner) p += 20;
+    return p;
+  })();
+
+  // ── LOGIN ─────────────────────────────────────────────────────────────────
+  if (showLogin) return (
+    <div><style>{STYLES}</style>
+      <div className="login-wrap">
+        <div className="login-box">
+          <div className="login-icon">🔐</div>
+          <div className="login-title">Admin</div>
+          <div className="login-sub">Acceso al tablero de simulaciones</div>
+          <input className="login-inp" type="password" placeholder="Contraseña" value={loginPwd}
+            onChange={e=>setLoginPwd(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleLogin()}/>
+          <button className="login-btn" onClick={handleLogin}>Ingresar</button>
+          {loginErr && <div className="login-err">{loginErr}</div>}
+          <button onClick={()=>setShowLogin(false)}
+            style={{background:"none",border:"none",color:"#8899bb",marginTop:14,cursor:"pointer",fontSize:".8rem"}}>
+            ← Volver
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const TABS = [
+    {id:"groups",  label:"Grupos",  done:groupsDone},
+    {id:"bracket", label:"Bracket", done:!!finalMatch?.main?.winner, locked:!r32},
+  ];
+
+  return (
+    <div className="app">
+      <style>{STYLES}</style>
+      {/* HEADER */}
+      <div className="hdr">
+        <div className="hdr-inner">
+          <div style={{display:"flex",alignItems:"center",gap:12}}>
+            <div className="badge">⚽</div>
+            <div>
+              <div className="hdr-title">Rodillones</div>
+              <div className="hdr-sub">Simulador · FIFA World Cup 2026</div>
+            </div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:12}}>
+            {champion && <div style={{color:C.gold,fontFamily:"'Barlow Condensed',sans-serif",fontSize:".82rem",letterSpacing:"1px"}}>🏆 {flag(champion)} {champion}</div>}
+            <button className="admin-btn" onClick={()=>adminMode?setTab("admin"):setShowLogin(true)}>
+              {adminMode?"📊 Panel":"🔑 Admin"}
+            </button>
+          </div>
+        </div>
+      </div>
+      {/* TABS */}
+      <div className="tabs-bar">
+        {TABS.map(t=>(
+          <button key={t.id} className={`tab${tab===t.id?" active":""}${t.locked?" locked":""}`}
+            onClick={()=>!t.locked&&setTab(t.id)}>
+            {t.label}{t.done?" ✓":""}
+          </button>
+        ))}
+        {adminMode && <button className={`tab${tab==="admin"?" active":""}`} onClick={()=>setTab("admin")}>📊 Simulaciones</button>}
+      </div>
+
+      <div className="content">
+        {/* PROGRESS */}
+        <div className="prog-wrap"><div className="prog-bar" style={{width:`${progress}%`}}/></div>
+
+        {/* ── GRUPOS ── */}
+        {tab==="groups" && (<>
+          <div className="s-title">⚽ Fase de Grupos</div>
+          <div className="info-box">Ingresa los marcadores. Los 2 primeros de cada grupo clasifican. Los 8 mejores terceros también avanzan según criterios FIFA.</div>
+          <div className="groups-grid">
+            {Object.entries(GROUPS_DATA).map(([g,teams]) => {
+              const rows = groupStandings[g];
+              return (
+                <div key={g} className="g-card">
+                  <div className="g-hdr"><div className="g-letter">Grupo {g}</div></div>
+                  <table className="standings">
+                    <thead><tr><th style={{width:"50%"}}>Equipo</th><th>PJ</th><th>G</th><th>E</th><th>P</th><th>GD</th><th>Pts</th></tr></thead>
+                    <tbody>
+                      {rows.map(row=>(
+                        <tr key={row.team}>
+                          <td><div className="t-cell"><span>{flag(row.team)}</span><span style={{fontSize:".75rem"}}>{row.team}</span></div></td>
+                          <td>{row.p}</td><td>{row.w}</td><td>{row.d}</td><td>{row.l}</td>
+                          <td style={{color:row.gd>0?C.green:row.gd<0?C.red:C.gray}}>{row.gd>0?"+":""}{row.gd}</td>
+                          <td><span className="pts-b">{row.pts}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className="matches-lbl">Partidos</div>
+                  {groupMatches[g].map((m,i)=>(
+                    <div key={i} className="match-row">
+                      <div className="m-team">
+                        <span style={{fontSize:".88rem"}}>{flag(m.home)}</span>
+                        <span style={{fontSize:".72rem",maxWidth:65,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.home}</span>
+                      </div>
+                      <input className="score-inp" type="number" min="0" max="99" value={m.homeScore}
+                        onChange={e=>updateScore(g,i,"home",e.target.value)}/>
+                      <span className="score-sep">:</span>
+                      <input className="score-inp" type="number" min="0" max="99" value={m.awayScore}
+                        onChange={e=>updateScore(g,i,"away",e.target.value)}/>
+                      <div className="m-team away">
+                        <span style={{fontSize:".72rem",maxWidth:65,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textAlign:"right"}}>{m.away}</span>
+                        <span style={{fontSize:".88rem"}}>{flag(m.away)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+          {groupsDone && (
+            <div className="thirds-wrap">
+              <div className="thirds-title">📊 Ranking de Mejores 3ros — Los 8 primeros clasifican</div>
+              <table className="thirds-table">
+                <thead><tr><th>Pos</th><th>Equipo</th><th>Grupo</th><th>Pts</th><th>DG</th><th>GF</th><th>Estado</th></tr></thead>
+                <tbody>
+                  {allThirdsRanked.map((t,i)=>(
+                    <tr key={t.group} className={i<8?"qualify":"elim"}>
+                      <td style={{fontFamily:"'Bebas Neue',cursive",fontSize:"1rem",color:C.gold}}>{i+1}</td>
+                      <td style={{textAlign:"left"}}><div className="t-cell"><span>{flag(t.team)}</span><span>{t.team}</span></div></td>
+                      <td style={{color:C.gold,fontFamily:"'Bebas Neue',cursive",letterSpacing:"1px"}}>Grupo {t.group}</td>
+                      <td><span className="pts-b">{t.pts}</span></td>
+                      <td style={{color:t.gd>0?C.green:t.gd<0?C.red:C.gray}}>{t.gd>0?"+":""}{t.gd}</td>
+                      <td>{t.gf}</td>
+                      <td style={{color:i<8?C.green:C.red,fontFamily:"'Barlow Condensed',sans-serif",fontSize:".75rem",letterSpacing:"1px"}}>
+                        {i<8?"✅ CLASIFICA":"❌ ELIMINADO"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <button className="adv-btn" onClick={advanceToR32} style={{marginTop:20}}>
+                Generar Bracket de 16avos →
+              </button>
+            </div>
+          )}
+        </>)}
+
+        {/* ── BRACKET ── */}
+        {tab==="bracket" && r32 && (<>
+          <div className="s-title">⚡ Bracket del Mundial 2026</div>
+          <div className="info-box">Haz clic en el equipo ganador de cada partido. Los cruces respetan la matriz oficial FIFA 2026.</div>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:16}}>
+            {r32Done && !r16 && <button className="adv-btn" onClick={advanceToR16} style={{margin:0}}>Confirmar 16avos → Generar 8avos</button>}
+            {r16Done && !qf  && <button className="adv-btn" onClick={advanceToQF}  style={{margin:0}}>Confirmar 8avos → Generar Cuartos</button>}
+            {qfDone  && !sf  && <button className="adv-btn" onClick={advanceToSF}  style={{margin:0}}>Confirmar Cuartos → Generar Semis</button>}
+          </div>
+          <BracketView
+            r32={r32} r16={r16} qf={qf} sf={sf} final={finalMatch}
+            champion={champion} thirdPlace={thirdPlace}
+            onR32={selectR32Winner} onR16={selectR16Winner}
+            onQF={selectQFWinner} onSF={selectSFWinner} onFinal={selectFinalWinner}
+          />
+          {/* SAVE SECTION */}
+          {finalMatch?.main?.winner && (
+            <div className="save-sec">
+              <div className="save-title">💾 Guardar Simulación en Google Sheets</div>
+              <div className="save-form">
+                <div className="f-grp">
+                  <label className="f-lbl">Tu Nombre</label>
+                  <input className="f-inp" placeholder="Ej: Juan García" value={userName}
+                    onChange={e=>setUserName(e.target.value)}/>
+                </div>
+                <div className="f-grp">
+                  <label className="f-lbl">Tu Apodo</label>
+                  <input className="f-inp" placeholder="Ej: El Maestro" value={userNick}
+                    onChange={e=>setUserNick(e.target.value)}/>
+                </div>
+                <button className="save-btn" onClick={handleSave}
+                  disabled={!userName.trim()||!userNick.trim()}>
+                  ⬆️ Guardar
+                </button>
+              </div>
+              {savedMsg && <div className={`save-ok ${savedMsgType}`}>{savedMsg}</div>}
+            </div>
+          )}
+        </>)}
+
+        {/* ── ADMIN ── */}
+        {tab==="admin" && adminMode && (
+          <div className="admin-panel">
+            <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12,marginBottom:4}}>
+              <div>
+                <div className="admin-title">📊 Tablero Admin</div>
+                <div className="admin-sub">
+                  {loadingData ? "⏳ Cargando..." : `${simulations.length} simulación(es) · 🟢 Google Sheets conectado`}
+                </div>
+              </div>
+              <button className="adv-btn" style={{margin:0,fontSize:".75rem",padding:"8px 16px"}}
+                onClick={handleRefresh}>
+                🔄 Actualizar
+              </button>
+            </div>
+            {loadingData
+              ? <div className="admin-empty">⏳ Cargando simulaciones...</div>
+              : simulations.length===0
+                ? <div className="admin-empty">No hay simulaciones guardadas todavía.</div>
+                : <div className="admin-grid">
+                    {simulations.map(s=>(
+                      <AdminCard key={s.id} s={s} onDelete={handleDelete}/>
+                    ))}
+                  </div>
+            }
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── RENDER ───────────────────────────────────────────────────────────────────
+ReactDOM.createRoot(document.getElementById("root")).render(<Rodillones/>);
+</script>
+</body>
+</html>
